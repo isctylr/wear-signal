@@ -31,6 +31,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
   var intervalMinutes by remember { mutableIntStateOf(account.pollIntervalMinutes) }
   var backgroundPolling by remember { mutableStateOf(account.backgroundPollingEnabled) }
   var override by remember { mutableStateOf(account.phoneConnectedOverride) }
+  var lockscreenPrivacy by remember { mutableStateOf(account.lockscreenPrivacyEnabled) }
   var confirmingUnlink by remember { mutableStateOf(false) }
 
   ScalingLazyColumn {
@@ -81,6 +82,18 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
           modifier = Modifier.fillMaxWidth()
         )
       }
+    }
+    item {
+      Chip(
+        label = { Text(if (lockscreenPrivacy) "Lock screen: Private" else "Lock screen: Show all") },
+        secondaryLabel = { Text(if (lockscreenPrivacy) "Hides name & message" else "Shows preview on lock") },
+        onClick = {
+          lockscreenPrivacy = !lockscreenPrivacy
+          account.lockscreenPrivacyEnabled = lockscreenPrivacy
+        },
+        colors = ChipDefaults.secondaryChipColors(),
+        modifier = Modifier.fillMaxWidth()
+      )
     }
     item {
       // Debug helper while testing on the emulator: force the phone-connected state.
