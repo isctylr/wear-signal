@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Single SQLite database holding the Signal protocol stores (per account identity: "aci"/"pni"),
  * received messages, and the contact-name cache.
  */
-class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db", null, 6) {
+class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db", null, 7) {
 
   override fun onCreate(db: SQLiteDatabase) {
     createDirectoryTable(db)
@@ -107,7 +107,8 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
         read_at INTEGER NOT NULL DEFAULT 0,
         attachment_type TEXT,
         attachment_pointer BLOB,
-        attachment_path TEXT
+        attachment_path TEXT,
+        expires_at INTEGER NOT NULL DEFAULT 0
       )
       """
     )
@@ -154,6 +155,31 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
       db.execSQL("ALTER TABLE messages ADD COLUMN attachment_type TEXT")
       db.execSQL("ALTER TABLE messages ADD COLUMN attachment_pointer BLOB")
       db.execSQL("ALTER TABLE messages ADD COLUMN attachment_path TEXT")
+    }
+    if (oldVersion < 7) {
+      db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
+    }
+  }
+
+  /** Completely clears all tables during device unlink / data wipe. */
+  fun wipeAllData() {
+    val db = writableDatabase
+    db.beginTransaction()
+    try {
+      db.delete("messages", null, null)
+      db.delete("identities", null, null)
+      db.delete("sessions", null, null)
+      db.delete("one_time_prekeys", null, null)
+      db.delete("signed_prekeys", null, null)
+      db.delete("kyber_prekeys", null, null)
+      db.delete("used_kyber_tuples", null, null)
+      db.delete("sender_keys", null, null)
+      db.delete("contacts", null, null)
+      db.delete("groups", null, null)
+      db.delete("directory", null, null)
+      db.setTransactionSuccessful()
+    } finally {
+      db.endTransaction()
     }
   }
 

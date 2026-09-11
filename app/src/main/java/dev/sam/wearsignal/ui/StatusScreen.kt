@@ -25,12 +25,13 @@ import java.util.Date
  * Settings: linked-account info, the manual notification control, and debug helpers.
  */
 @Composable
-fun StatusScreen() {
+fun StatusScreen(onUnlinked: () -> Unit = {}) {
   val context = LocalContext.current
   val account = AppDeps.account
   var intervalMinutes by remember { mutableIntStateOf(account.pollIntervalMinutes) }
   var backgroundPolling by remember { mutableStateOf(account.backgroundPollingEnabled) }
   var override by remember { mutableStateOf(account.phoneConnectedOverride) }
+  var confirmingUnlink by remember { mutableStateOf(false) }
 
   ScalingLazyColumn {
     item {
@@ -104,6 +105,35 @@ fun StatusScreen() {
         colors = ChipDefaults.secondaryChipColors(),
         modifier = Modifier.fillMaxWidth()
       )
+    }
+    item {
+      if (confirmingUnlink) {
+        Chip(
+          label = { Text("Confirm Unlink", color = androidx.compose.ui.graphics.Color(0xFFFF8A80)) },
+          secondaryLabel = { Text("Wipes all chats and keys") },
+          onClick = {
+            PollScheduler.cancel(context)
+            androidx.work.WorkManager.getInstance(context).cancelAllWork()
+            AppDeps.database.wipeAllData()
+            AppDeps.avatars.dir.deleteRecursively()
+            AppDeps.avatars.dir.mkdirs()
+            java.io.File(context.filesDir, "attachments").deleteRecursively()
+            java.io.File(context.filesDir, "attachments").mkdirs()
+            AppDeps.account.clear()
+            onUnlinked()
+          },
+          colors = ChipDefaults.secondaryChipColors(),
+          modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        )
+      } else {
+        Chip(
+          label = { Text("Unlink Watch") },
+          secondaryLabel = { Text("Wipe data & relink") },
+          onClick = { confirmingUnlink = true },
+          colors = ChipDefaults.secondaryChipColors(),
+          modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        )
+      }
     }
   }
 }
