@@ -60,6 +60,14 @@ class NotificationPresenter(private val context: Context) {
         ?.let { groupId -> GroupStateResolver.cachedTitle(groupId)?.let { "$sender @ $it" } ?: "$sender (group)" }
         ?: sender
       val notificationId = (message.sentAt % Int.MAX_VALUE).toInt() + index
+      val publicVersion = NotificationCompat.Builder(context, CHANNEL_ID)
+        .setSmallIcon(android.R.drawable.ic_dialog_email)
+        .setContentTitle("Signal")
+        .setContentText("New message")
+        .setContentIntent(contentIntent)
+        .setAutoCancel(true)
+        .build()
+
       val builder = NotificationCompat.Builder(context, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.ic_dialog_email)
         .setContentTitle(title)
@@ -69,6 +77,8 @@ class NotificationPresenter(private val context: Context) {
         .setAutoCancel(true)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+        .setPublicVersion(publicVersion)
 
       // Wear's native reply (voice/keyboard/canned) via RemoteInput; groups fan out on send.
       builder.addAction(buildReplyAction(message.peer, message.groupId != null, notificationId))

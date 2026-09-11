@@ -26,7 +26,7 @@ class AvatarStore(context: Context) {
   }
 
   private val appContext = context.applicationContext
-  private val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+  val dir = File(context.filesDir, "avatars").apply { mkdirs() }
 
   // Group ids are base64 ('/', '+', '='); ACIs/PNIs pass through mostly unchanged.
   private fun fileForKey(key: String) = File(dir, key.replace(Regex("[^a-zA-Z0-9-]"), "_") + ".jpg")
