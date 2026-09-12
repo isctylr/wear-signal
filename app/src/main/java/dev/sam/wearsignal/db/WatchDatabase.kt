@@ -2,7 +2,9 @@ package dev.sam.wearsignal.db
 
 import android.content.Context
 import dev.sam.wearsignal.account.AccountStore
+import net.zetetic.database.sqlcipher.SQLiteConnection
 import net.zetetic.database.sqlcipher.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteDatabaseHook
 import net.zetetic.database.sqlcipher.SQLiteOpenHelper
 import org.signal.core.util.logging.Log
 import java.io.File
@@ -23,14 +25,25 @@ class WatchDatabase private constructor(
   DATABASE_VERSION,
   0,
   null,
-  null,
+  DATABASE_HOOK,
   true
 ) {
 
   companion object {
     const val DATABASE_NAME = "wearsignal.db"
-    const val DATABASE_VERSION = 7
+    const val DATABASE_VERSION = 8
     private val TAG = Log.tag(WatchDatabase::class)
+
+    private val DATABASE_HOOK = object : SQLiteDatabaseHook {
+      override fun preKey(connection: SQLiteConnection) {
+        connection.executeRaw("PRAGMA cipher_default_kdf_cache = ON;", null, null)
+      }
+
+      override fun postKey(connection: SQLiteConnection) {
+        connection.executeRaw("PRAGMA cipher_kdf_cache = ON;", null, null)
+        connection.executeRaw("PRAGMA cache_size = 2000;", null, null)
+      }
+    }
 
     init {
       System.loadLibrary("sqlcipher")
@@ -207,6 +220,12 @@ class WatchDatabase private constructor(
       )
       """
     )
+    createIndexes(db)
+  }
+
+  override fun onOpen(db: SQLiteDatabase) {
+    super.onOpen(db)
+    createIndexes(db)
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -243,6 +262,15 @@ class WatchDatabase private constructor(
     if (oldVersion < 7) {
       db.execSQL("ALTER TABLE messages ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0")
     }
+    if (oldVersion < 8) {
+      createIndexes(db)
+    }
+  }
+
+  private fun createIndexes(db: SQLiteDatabase) {
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_peer_sent_at ON messages(peer, sent_at ASC)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages(expires_at)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at)")
   }
 
   /** Completely clears all tables during device unlink / data wipe. */

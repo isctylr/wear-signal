@@ -97,17 +97,22 @@ class MessagesRepository(private val db: WatchDatabase) {
 
   /** Purges messages whose disappearing expiration timer has elapsed. */
   fun purgeExpired(now: Long = System.currentTimeMillis()) {
+    var hasExpired = false
     val pathsToDelete = mutableListOf<String>()
     db.readableDatabase.rawQuery(
-      "SELECT attachment_path FROM messages WHERE expires_at > 0 AND expires_at <= ? AND attachment_path IS NOT NULL",
+      "SELECT attachment_path FROM messages WHERE expires_at > 0 AND expires_at <= ?",
       arrayOf(now.toString())
     ).use { cursor ->
       while (cursor.moveToNext()) {
-        pathsToDelete += cursor.getString(0)
+        hasExpired = true
+        val path = if (!cursor.isNull(0)) cursor.getString(0) else null
+        if (path != null) pathsToDelete += path
       }
     }
-    db.writableDatabase.delete("messages", "expires_at > 0 AND expires_at <= ?", arrayOf(now.toString()))
-    pathsToDelete.forEach { java.io.File(it).delete() }
+    if (hasExpired) {
+      db.writableDatabase.delete("messages", "expires_at > 0 AND expires_at <= ?", arrayOf(now.toString()))
+      pathsToDelete.forEach { java.io.File(it).delete() }
+    }
   }
 
   /**
