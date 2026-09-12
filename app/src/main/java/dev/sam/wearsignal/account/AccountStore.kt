@@ -163,6 +163,11 @@ class AccountStore(context: Context) {
     get() = prefs.getBoolean("lockscreen_privacy_enabled", true)
     set(value) = prefs.edit { putBoolean("lockscreen_privacy_enabled", value) }
 
+  /** Whether the SQLCipher database uses the raw key format (skipping PBKDF2 key iterations). */
+  var dbUsesRawKey: Boolean
+    get() = prefs.getBoolean("db_uses_raw_key", false)
+    set(value) = prefs.edit { putBoolean("db_uses_raw_key", value) }
+
   fun clear() {
     prefs.edit { clear() }
     if (securePrefs !== prefs) {
