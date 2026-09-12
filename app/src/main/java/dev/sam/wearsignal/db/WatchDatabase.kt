@@ -52,23 +52,14 @@ class WatchDatabase private constructor(
 
     operator fun invoke(context: Context, account: AccountStore): WatchDatabase {
       val passphrase = account.databasePassphrase
-      migratePlaintextIfNeeded(context, account, passphrase)
-      migrateLegacyKdfToRawKeyIfNeeded(context, account, passphrase)
-
-      val keyBytes = if (account.dbUsesRawKey) {
-        "x'$passphrase'".toByteArray(Charsets.UTF_8)
-      } else {
-        passphrase.toByteArray(Charsets.UTF_8)
-      }
+      migratePlaintextIfNeeded(context, passphrase)
+      val keyBytes = "x'$passphrase'".toByteArray(Charsets.UTF_8)
       return WatchDatabase(context, keyBytes, Unit)
     }
 
-    private fun migratePlaintextIfNeeded(context: Context, account: AccountStore, passphrase: String) {
+    private fun migratePlaintextIfNeeded(context: Context, passphrase: String) {
       val dbFile = context.getDatabasePath(DATABASE_NAME)
-      if (!dbFile.exists() || dbFile.length() < 16) {
-        account.dbUsesRawKey = true
-        return
-      }
+      if (!dbFile.exists() || dbFile.length() < 16) return
 
       val header = ByteArray(16)
       try {
@@ -84,7 +75,7 @@ class WatchDatabase private constructor(
         return
       }
 
-      Log.i(TAG, "Plaintext SQLite database detected; migrating directly to raw-key SQLCipher AES-256...")
+      Log.i(TAG, "Plaintext SQLite database detected; migrating to raw-key SQLCipher AES-256...")
       val tempEncrypted = File(dbFile.parentFile, "wearsignal_encrypted.db")
       if (tempEncrypted.exists()) tempEncrypted.delete()
 
@@ -105,68 +96,13 @@ class WatchDatabase private constructor(
         File(dbFile.path + "-journal").delete()
 
         if (dbFile.delete() && tempEncrypted.renameTo(dbFile)) {
-          account.dbUsesRawKey = true
-          Log.i(TAG, "Successfully migrated plaintext database to raw-key SQLCipher encryption")
+          Log.i(TAG, "Successfully migrated database to raw-key SQLCipher encryption")
         } else {
           Log.e(TAG, "Failed to replace plaintext database with encrypted database")
         }
       } catch (t: Throwable) {
         Log.e(TAG, "Failed to migrate plaintext database to SQLCipher", t)
         if (tempEncrypted.exists()) tempEncrypted.delete()
-      }
-    }
-
-    private fun migrateLegacyKdfToRawKeyIfNeeded(context: Context, account: AccountStore, passphrase: String) {
-      if (account.dbUsesRawKey) return
-
-      val dbFile = context.getDatabasePath(DATABASE_NAME)
-      if (!dbFile.exists() || dbFile.length() < 16) {
-        account.dbUsesRawKey = true
-        return
-      }
-
-      val header = ByteArray(16)
-      try {
-        dbFile.inputStream().use { it.read(header) }
-      } catch (t: Throwable) {
-        Log.w(TAG, "Failed to read database header", t)
-        return
-      }
-
-      if (header.contentEquals("SQLite format 3\u0000".toByteArray(Charsets.US_ASCII))) {
-        // Handled by migratePlaintextIfNeeded
-        return
-      }
-
-      Log.i(TAG, "Migrating SQLCipher database from 256k PBKDF2 iterations to raw key (zero iterations)...")
-      val tempRawDb = File(dbFile.parentFile, "wearsignal_raw.db")
-      if (tempRawDb.exists()) tempRawDb.delete()
-
-      try {
-        val legacyDb = SQLiteDatabase.openOrCreateDatabase(dbFile.path, passphrase, null, null)
-        try {
-          val version = legacyDb.version
-          legacyDb.rawExecSQL("ATTACH DATABASE '${tempRawDb.path}' AS raw_db KEY \"x'$passphrase'\";")
-          legacyDb.rawExecSQL("SELECT sqlcipher_export('raw_db');")
-          legacyDb.rawExecSQL("PRAGMA raw_db.user_version = $version;")
-          legacyDb.rawExecSQL("DETACH DATABASE raw_db;")
-        } finally {
-          legacyDb.close()
-        }
-
-        File(dbFile.path + "-wal").delete()
-        File(dbFile.path + "-shm").delete()
-        File(dbFile.path + "-journal").delete()
-
-        if (dbFile.delete() && tempRawDb.renameTo(dbFile)) {
-          account.dbUsesRawKey = true
-          Log.i(TAG, "Successfully migrated database to raw key (zero PBKDF2 iterations)")
-        } else {
-          Log.e(TAG, "Failed to replace legacy database with raw key database")
-        }
-      } catch (t: Throwable) {
-        Log.e(TAG, "Failed to migrate database to raw key", t)
-        if (tempRawDb.exists()) tempRawDb.delete()
       }
     }
   }
