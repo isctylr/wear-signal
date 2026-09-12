@@ -45,3 +45,5 @@ wear-input = "androidx.wear:wear-input:1.1.0"
 playservices-wearable = "com.google.android.gms:play-services-wearable:19.0.0"
 zxing-core = "com.google.zxing:core:3.5.3"
 work-runtime = "androidx.work:work-runtime-ktx:2.10.5"
+androidx-security-crypto = "androidx.security:security-crypto:1.1.0-alpha06"
+
