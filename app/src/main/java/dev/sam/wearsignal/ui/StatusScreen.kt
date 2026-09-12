@@ -132,8 +132,10 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
             AppDeps.avatars.dir.mkdirs()
             java.io.File(context.filesDir, "attachments").deleteRecursively()
             java.io.File(context.filesDir, "attachments").mkdirs()
+            dev.sam.wearsignal.net.CertificateStore.clear()
             AppDeps.account.clear()
             onUnlinked()
+
           },
           colors = ChipDefaults.secondaryChipColors(),
           modifier = Modifier.fillMaxWidth().padding(top = 8.dp)

@@ -113,6 +113,9 @@ class SignalNet(context: Context, private val account: AccountStore) {
 
   val cdsApi: CdsApi by lazy { CdsApi(authWebSocket) }
 
+  val certificateApi: CertificateApi by lazy { CertificateApi(authWebSocket) }
+
+
   val authPushServiceSocket: PushServiceSocket by lazy {
     PushServiceSocket(configuration, credentialsProvider, BuildConfig.SIGNAL_AGENT, false)
   }
