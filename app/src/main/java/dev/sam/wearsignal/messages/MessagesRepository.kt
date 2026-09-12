@@ -53,8 +53,10 @@ class MessagesRepository(private val db: WatchDatabase) {
     serverAt: Long,
     fromSelf: Boolean,
     attachmentType: String? = null,
-    attachmentPointer: ByteArray? = null
+    attachmentPointer: ByteArray? = null,
+    expiresAt: Long = 0L
   ) {
+    purgeExpired()
     val values = ContentValues().apply {
       put("peer", peer)
       put("sender_aci", senderAci)
@@ -65,6 +67,7 @@ class MessagesRepository(private val db: WatchDatabase) {
       put("from_self", if (fromSelf) 1 else 0)
       put("attachment_type", attachmentType)
       put("attachment_pointer", attachmentPointer)
+      put("expires_at", expiresAt)
     }
     db.writableDatabase.insert("messages", null, values)
     db.writableDatabase.execSQL(
@@ -77,11 +80,42 @@ class MessagesRepository(private val db: WatchDatabase) {
     )
   }
 
+  /** Remote deletion ("Delete for Everyone"): removes messages by sent timestamp. */
+  fun deleteByTimestamp(sentAt: Long) {
+    val pathsToDelete = mutableListOf<String>()
+    db.readableDatabase.rawQuery(
+      "SELECT attachment_path FROM messages WHERE sent_at = ? AND attachment_path IS NOT NULL",
+      arrayOf(sentAt.toString())
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        pathsToDelete += cursor.getString(0)
+      }
+    }
+    db.writableDatabase.delete("messages", "sent_at = ?", arrayOf(sentAt.toString()))
+    pathsToDelete.forEach { java.io.File(it).delete() }
+  }
+
+  /** Purges messages whose disappearing expiration timer has elapsed. */
+  fun purgeExpired(now: Long = System.currentTimeMillis()) {
+    val pathsToDelete = mutableListOf<String>()
+    db.readableDatabase.rawQuery(
+      "SELECT attachment_path FROM messages WHERE expires_at > 0 AND expires_at <= ? AND attachment_path IS NOT NULL",
+      arrayOf(now.toString())
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        pathsToDelete += cursor.getString(0)
+      }
+    }
+    db.writableDatabase.delete("messages", "expires_at > 0 AND expires_at <= ?", arrayOf(now.toString()))
+    pathsToDelete.forEach { java.io.File(it).delete() }
+  }
+
   /**
    * The [limit] most recently active conversations, with group titles / contact names
    * resolved where known. Ask for one more than you show to learn whether more exist.
    */
   fun conversations(limit: Int = Int.MAX_VALUE): List<ConversationRow> {
+    purgeExpired()
     val result = mutableListOf<ConversationRow>()
     db.readableDatabase.rawQuery(
       """
@@ -126,6 +160,7 @@ class MessagesRepository(private val db: WatchDatabase) {
 
   /** Messages of one conversation, oldest first, with sender names resolved from the contacts cache. */
   fun thread(peer: String): List<MessageRow> {
+    purgeExpired()
     val result = mutableListOf<MessageRow>()
     db.readableDatabase.rawQuery(
       """

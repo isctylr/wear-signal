@@ -74,6 +74,18 @@ object GroupStateResolver {
         val group = AppDeps.net.groupsV2Api.getGroup(secretParams, authorization).group
         val members = DecryptedGroupUtil.toAciList(group.members).joinToString(",") { it.toString() }
 
+        for (member in group.members) {
+          val memberAci = org.signal.core.models.ServiceId.ACI.parseOrNull(member.aciBytes) ?: continue
+          val pk = member.profileKey
+          if (pk.size > 0) {
+            db.writableDatabase.execSQL(
+              "INSERT INTO contacts (aci, profile_key, fetched_at) VALUES (?, ?, 0) " +
+                "ON CONFLICT(aci) DO UPDATE SET profile_key = excluded.profile_key",
+              arrayOf(memberAci.toString(), pk.toByteArray())
+            )
+          }
+        }
+
         updateAvatar(groupId, secretParams, group.avatar)
 
         val values = ContentValues().apply {
@@ -99,7 +111,7 @@ object GroupStateResolver {
         return
       }
 
-      val encrypted = File.createTempFile("group-avatar", ".tmp")
+      val encrypted = AppDeps.avatars.createTempFile("group-avatar")
       try {
         AppDeps.net.authPushServiceSocket.retrieveGroupsV2ProfileAvatar(avatarPath, encrypted, MAX_AVATAR_DOWNLOAD_BYTES)
         val imageBytes = AppDeps.net.groupsV2Operations.forGroup(secretParams).decryptAvatar(encrypted.readBytes())

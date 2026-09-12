@@ -88,7 +88,13 @@ fun WearSignalNavHost() {
       }
     }
     composable("settings") {
-      StatusScreen()
+      StatusScreen(
+        onUnlinked = {
+          navController.navigate("pairing") {
+            popUpTo(0) { inclusive = true }
+          }
+        }
+      )
     }
     composable("conversations") {
       var limit by remember { mutableIntStateOf(10) }

@@ -55,7 +55,8 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
     /** Content type of the first attachment, if any (downloaded later when it's an image). */
     val attachmentType: String? = null,
     /** Serialized AttachmentPointer proto for the first attachment. */
-    val attachmentPointer: ByteArray? = null
+    val attachmentPointer: ByteArray? = null,
+    val expiresAt: Long = 0L
   )
 
   fun process(envelope: Envelope, serverDeliveredTimestamp: Long): IncomingMessage? {
@@ -116,31 +117,56 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
 
     content.dataMessage?.let { data ->
       harvestProfileKey(sourceServiceId, data)
+
+      val targetSent = data.delete?.targetSentTimestamp ?: data.adminDelete?.targetSentTimestamp
+      if (targetSent != null) {
+        Log.i(TAG, "Processing remote delete for message sent at $targetSent")
+        messages.deleteByTimestamp(targetSent)
+        return null
+      }
+
       val body = data.body
       val attachment = data.attachments.firstOrNull()
       if (body.isNullOrEmpty() && attachment == null) {
         return null
       }
+      val sentAt = data.timestamp ?: envelope.clientTimestamp ?: serverDeliveredTimestamp
+      val expiresAt = data.expireTimer?.let { timer ->
+        if (timer > 0) sentAt + (timer * 1000L) else 0L
+      } ?: 0L
       val groupId = data.groupV2?.let { recordGroup(it.masterKey!!.toByteArray(), it.revision ?: 0) }
       return IncomingMessage(
         peer = groupId ?: sourceServiceId.toString(),
         senderAci = sourceServiceId.toString(),
         groupId = groupId,
         body = body.orEmpty(),
-        sentAt = data.timestamp ?: envelope.clientTimestamp ?: serverDeliveredTimestamp,
+        sentAt = sentAt,
         fromSelf = false,
         attachmentType = attachment?.contentType,
-        attachmentPointer = attachment?.encode()
+        attachmentPointer = attachment?.encode(),
+        expiresAt = expiresAt
       )
     }
 
     content.syncMessage?.sent?.let { sent ->
       val data = sent.message ?: return null
+
+      val targetSent = data.delete?.targetSentTimestamp ?: data.adminDelete?.targetSentTimestamp
+      if (targetSent != null) {
+        Log.i(TAG, "Processing synced remote delete for message sent at $targetSent")
+        messages.deleteByTimestamp(targetSent)
+        return null
+      }
+
       val body = data.body
       val attachment = data.attachments.firstOrNull()
       if (body.isNullOrEmpty() && attachment == null) {
         return null
       }
+      val sentAt = sent.timestamp ?: serverDeliveredTimestamp
+      val expiresAt = data.expireTimer?.let { timer ->
+        if (timer > 0) sentAt + (timer * 1000L) else 0L
+      } ?: 0L
       val groupId = data.groupV2?.let { recordGroup(it.masterKey!!.toByteArray(), it.revision ?: 0) }
       // Newer clients set only the binary field; older ones only the string. Accept either.
       val destination = ServiceId.parseOrNull(sent.destinationServiceId, sent.destinationServiceIdBinary)?.toString()
@@ -154,10 +180,11 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
         senderAci = selfAci.toString(),
         groupId = groupId,
         body = body.orEmpty(),
-        sentAt = sent.timestamp ?: serverDeliveredTimestamp,
+        sentAt = sentAt,
         fromSelf = true,
         attachmentType = attachment?.contentType,
-        attachmentPointer = attachment?.encode()
+        attachmentPointer = attachment?.encode(),
+        expiresAt = expiresAt
       )
     }
 
@@ -175,7 +202,8 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
       serverAt = System.currentTimeMillis(),
       fromSelf = message.fromSelf,
       attachmentType = message.attachmentType,
-      attachmentPointer = message.attachmentPointer
+      attachmentPointer = message.attachmentPointer,
+      expiresAt = message.expiresAt
     )
   }
 
@@ -234,7 +262,12 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
     }
     val inserted = db.insertWithOnConflict("groups", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
     if (inserted == -1L) {
-      db.execSQL("UPDATE groups SET revision = MAX(revision, ?) WHERE group_id = ?", arrayOf(revision, groupId))
+      db.execSQL(
+        "UPDATE groups SET revision = MAX(revision, ?), " +
+          "fetched_at = CASE WHEN ? > revision THEN 0 ELSE fetched_at END " +
+          "WHERE group_id = ?",
+        arrayOf(revision, revision, groupId)
+      )
     } else {
       db.execSQL("UPDATE groups SET revision = ? WHERE group_id = ?", arrayOf(revision, groupId))
     }

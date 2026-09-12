@@ -3,18 +3,72 @@ package dev.sam.wearsignal.account
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
-import org.signal.core.util.Base64
-import org.signal.libsignal.protocol.IdentityKeyPair
-import org.signal.libsignal.zkgroup.profiles.ProfileKey
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import org.signal.core.models.ServiceId.ACI
 import org.signal.core.models.ServiceId.PNI
+import org.signal.core.util.Base64
+import org.signal.core.util.logging.Log
+import org.signal.libsignal.protocol.IdentityKeyPair
+import org.signal.libsignal.zkgroup.profiles.ProfileKey
 
 /**
  * Persistent storage for the linked account: identity, credentials, and app settings.
+ * Sensitive cryptographic keys and passwords are encrypted at rest using Android Keystore.
  */
 class AccountStore(context: Context) {
 
+  companion object {
+    private val TAG = Log.tag(AccountStore::class)
+    private val SENSITIVE_KEYS = listOf("password", "aci_identity", "pni_identity", "profile_key")
+  }
+
   private val prefs: SharedPreferences = context.getSharedPreferences("account", Context.MODE_PRIVATE)
+
+  private val securePrefs: SharedPreferences by lazy {
+    try {
+      val masterKey = MasterKey.Builder(context)
+        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+        .build()
+      EncryptedSharedPreferences.create(
+        context,
+        "secure_account",
+        masterKey,
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+      )
+    } catch (t: Throwable) {
+      Log.e(TAG, "Failed to initialize EncryptedSharedPreferences, falling back to standard prefs", t)
+      prefs
+    }
+  }
+
+  init {
+    migrateCredentialsIfNecessary()
+  }
+
+  private fun migrateCredentialsIfNecessary() {
+    val toMigrate = mutableMapOf<String, String>()
+    for (key in SENSITIVE_KEYS) {
+      val value = prefs.getString(key, null)
+      if (value != null) {
+        toMigrate[key] = value
+      }
+    }
+    if (toMigrate.isNotEmpty() && securePrefs !== prefs) {
+      securePrefs.edit {
+        for ((k, v) in toMigrate) {
+          putString(k, v)
+        }
+      }
+      prefs.edit {
+        for (k in toMigrate.keys) {
+          remove(k)
+        }
+      }
+      Log.i(TAG, "Migrated ${toMigrate.size} credentials to EncryptedSharedPreferences")
+    }
+  }
 
   val isLinked: Boolean
     get() = prefs.getString("aci", null) != null && deviceId > 0
@@ -36,20 +90,20 @@ class AccountStore(context: Context) {
     set(value) = prefs.edit { putInt("device_id", value) }
 
   var password: String?
-    get() = prefs.getString("password", null)
-    set(value) = prefs.edit { putString("password", value) }
+    get() = securePrefs.getString("password", null)
+    set(value) = securePrefs.edit { putString("password", value) }
 
   var aciIdentityKeyPair: IdentityKeyPair?
-    get() = prefs.getString("aci_identity", null)?.let { IdentityKeyPair(Base64.decode(it)) }
-    set(value) = prefs.edit { putString("aci_identity", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
+    get() = securePrefs.getString("aci_identity", null)?.let { IdentityKeyPair(Base64.decode(it)) }
+    set(value) = securePrefs.edit { putString("aci_identity", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
 
   var pniIdentityKeyPair: IdentityKeyPair?
-    get() = prefs.getString("pni_identity", null)?.let { IdentityKeyPair(Base64.decode(it)) }
-    set(value) = prefs.edit { putString("pni_identity", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
+    get() = securePrefs.getString("pni_identity", null)?.let { IdentityKeyPair(Base64.decode(it)) }
+    set(value) = securePrefs.edit { putString("pni_identity", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
 
   var profileKey: ProfileKey?
-    get() = prefs.getString("profile_key", null)?.let { ProfileKey(Base64.decode(it)) }
-    set(value) = prefs.edit { putString("profile_key", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
+    get() = securePrefs.getString("profile_key", null)?.let { ProfileKey(Base64.decode(it)) }
+    set(value) = securePrefs.edit { putString("profile_key", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
 
   var aciRegistrationId: Int
     get() = prefs.getInt("aci_registration_id", 0)
@@ -89,7 +143,16 @@ class AccountStore(context: Context) {
     get() = if (prefs.contains("phone_connected_override")) prefs.getBoolean("phone_connected_override", false) else null
     set(value) = prefs.edit { if (value == null) remove("phone_connected_override") else putBoolean("phone_connected_override", value) }
 
+  /** Whether to redact sender name and message content on the lock screen / off-wrist. */
+  var lockscreenPrivacyEnabled: Boolean
+    get() = prefs.getBoolean("lockscreen_privacy_enabled", true)
+    set(value) = prefs.edit { putBoolean("lockscreen_privacy_enabled", value) }
+
   fun clear() {
     prefs.edit { clear() }
+    if (securePrefs !== prefs) {
+      securePrefs.edit { clear() }
+    }
   }
+
 }

@@ -1,13 +1,17 @@
 package dev.sam.wearsignal.messages
 
 import dev.sam.wearsignal.AppDeps
+import dev.sam.wearsignal.net.CertificateStore
 import org.signal.core.models.ServiceId
 import org.signal.core.util.logging.Log
+import org.signal.libsignal.metadata.certificate.SenderCertificate
 import org.signal.libsignal.zkgroup.groups.GroupMasterKey
+import org.signal.libsignal.zkgroup.profiles.ProfileKey
 import org.whispersystems.signalservice.api.SignalServiceMessageSender.IndividualSendEvents
 import org.whispersystems.signalservice.api.SignalServiceMessageSender.LegacyGroupEvents
 import org.whispersystems.signalservice.api.crypto.ContentHint
 import org.whispersystems.signalservice.api.crypto.SealedSenderAccess
+import org.whispersystems.signalservice.api.crypto.UnidentifiedAccess
 import org.whispersystems.signalservice.api.messages.SignalServiceDataMessage
 import org.whispersystems.signalservice.api.messages.SignalServiceGroupV2
 import org.whispersystems.signalservice.api.messages.multidevice.SentTranscriptMessage
@@ -19,7 +23,8 @@ import java.util.Optional
  * Sends text messages: 1:1 to a ServiceId, or to a group by fanning out pairwise sends
  * with the groupV2 context (no sender key). After a successful send, a sent transcript
  * goes to our other devices so the phone shows the message too.
- * Authenticated sends (no sealed sender). Synchronous — call from a background thread.
+ * Supports Sealed Sender (Unidentified Delivery) with automatic authenticated fallback.
+ * Synchronous — call from a background thread.
  */
 object MessageSender {
 
@@ -38,6 +43,7 @@ object MessageSender {
   /**
    * Sends to [recipient], a ServiceId string — either a bare-UUID ACI (replies, known contacts) or a
    * "PNI:"-prefixed PNI (a contact discovered by number, whose ACI Signal won't reveal until first contact).
+   * Attempts Sealed Sender if the recipient's profile key and sender certificate are available.
    */
   fun sendText(recipient: String, body: String): Result {
     if (!AppDeps.account.isLinked) return Result.Failure("Not linked")
@@ -52,10 +58,12 @@ object MessageSender {
     val webSocket = AppDeps.net.authWebSocket
     return try {
       webSocket.connect()
+      val senderCert = CertificateStore.getCertificate(AppDeps.net)
+      val sealedSenderAccess = buildSealedSenderAccess(serviceId, senderCert)
       val address = SignalServiceAddress(serviceId)
       val result = AppDeps.net.messageSender.sendDataMessage(
         address,
-        null, // authenticated send, no sealed sender
+        sealedSenderAccess,
         ContentHint.RESENDABLE,
         message,
         IndividualSendEvents.EMPTY,
@@ -64,9 +72,10 @@ object MessageSender {
       )
 
       if (result.isSuccess) {
-        sendSyncTranscript(message, Optional.of(address), setOf(serviceId))
+        val wasUnidentified = result.success?.isUnidentified ?: false
+        sendSyncTranscript(message, Optional.of(address), mapOf(serviceId to wasUnidentified))
         storeSent(peer = recipient, groupId = null, body = body, sentAt = now)
-        Log.i(TAG, "Message sent to ${recipient.take(12)}")
+        Log.i(TAG, "Message sent to ${recipient.take(12)} (sealedSender=$wasUnidentified)")
         Result.Success
       } else {
         Log.w(TAG, "Send unsuccessful: network=${result.isNetworkFailure} unregistered=${result.isUnregisteredFailure} identity=${result.identityFailure != null}")
@@ -110,10 +119,12 @@ object MessageSender {
     val webSocket = AppDeps.net.authWebSocket
     return try {
       webSocket.connect()
+      val senderCert = CertificateStore.getCertificate(AppDeps.net)
       val addresses = recipients.map { SignalServiceAddress(it) }
+      val sealedSenderAccesses = recipients.map { buildSealedSenderAccess(it, senderCert) }
       val results = AppDeps.net.messageSender.sendDataMessage(
         addresses,
-        addresses.map { null as SealedSenderAccess? }, // authenticated sends, no sealed sender
+        sealedSenderAccesses,
         false, // isRecipientUpdate
         ContentHint.RESENDABLE,
         message,
@@ -125,9 +136,15 @@ object MessageSender {
 
       val delivered = results.count { it.isSuccess }
       if (delivered > 0) {
-        sendSyncTranscript(message, Optional.empty(), recipients.toSet())
+        val unidentifiedMap = recipients.mapIndexed { idx, sid ->
+          val res = results.getOrNull(idx)
+          val wasUnidentified = res?.isSuccess == true && (res.success?.isUnidentified ?: false)
+          sid to wasUnidentified
+        }.toMap()
+        sendSyncTranscript(message, Optional.empty(), unidentifiedMap)
         storeSent(peer = groupId, groupId = groupId, body = body, sentAt = now)
-        Log.i(TAG, "Group message sent to $delivered/${results.size} member(s)")
+        val unidentifiedCount = unidentifiedMap.values.count { it }
+        Log.i(TAG, "Group message sent to $delivered/${results.size} member(s) ($unidentifiedCount sealed)")
         Result.Success
       } else {
         Log.w(TAG, "Group send failed for all ${results.size} member(s)")
@@ -141,15 +158,44 @@ object MessageSender {
     }
   }
 
-  /** Tells our other devices (the phone) about the send. Best-effort: the message already went out. */
-  private fun sendSyncTranscript(message: SignalServiceDataMessage, destination: Optional<SignalServiceAddress>, recipients: Set<ServiceId>) {
+  private fun getProfileKey(serviceId: ServiceId): ProfileKey? {
+    return AppDeps.database.readableDatabase.rawQuery(
+      "SELECT profile_key FROM contacts WHERE aci = ? AND profile_key IS NOT NULL",
+      arrayOf(serviceId.toString())
+    ).use { cursor ->
+      if (cursor.moveToFirst()) {
+        val blob = cursor.getBlob(0)
+        if (blob != null && blob.isNotEmpty()) ProfileKey(blob) else null
+      } else null
+    }
+  }
+
+  private fun buildSealedSenderAccess(serviceId: ServiceId, certificate: SenderCertificate?): SealedSenderAccess? {
+    if (certificate == null) return null
+    val profileKey = getProfileKey(serviceId) ?: return null
+    return try {
+      val accessKey = UnidentifiedAccess.deriveAccessKeyFrom(profileKey)
+      val unidentifiedAccess = UnidentifiedAccess(accessKey, certificate.serialized, false)
+      SealedSenderAccess.forIndividual(unidentifiedAccess)
+    } catch (t: Throwable) {
+      Log.w(TAG, "Failed to build sealed sender access for $serviceId", t)
+      null
+    }
+  }
+
+  /** Tells our other devices (the phone) about the send with accurate unidentified delivery status. */
+  private fun sendSyncTranscript(
+    message: SignalServiceDataMessage,
+    destination: Optional<SignalServiceAddress>,
+    unidentifiedStatus: Map<ServiceId, Boolean>
+  ) {
     try {
       val transcript = SentTranscriptMessage(
         destination,
         message.timestamp,
         Optional.of(message),
         0, // expirationStartTimestamp
-        recipients.associateWith { false }, // no unidentified delivery
+        unidentifiedStatus,
         false, // isRecipientUpdate
         Optional.empty(), // storyMessage
         emptySet(), // storyMessageRecipients
@@ -173,3 +219,4 @@ object MessageSender {
     )
   }
 }
+

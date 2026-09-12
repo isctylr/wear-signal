@@ -62,8 +62,10 @@ class WatchProtocolStore(
   }
 
   override fun isTrustedIdentity(address: SignalProtocolAddress, identityKey: IdentityKey, direction: IdentityKeyStore.Direction): Boolean {
-    // Trust on first use; a changed key is accepted too (we're a notification-only receiver,
-    // and the primary device is the place where safety numbers get verified).
+    if (direction == IdentityKeyStore.Direction.SENDING) {
+      val existing = getIdentity(address)
+      return existing == null || existing == identityKey
+    }
     return true
   }
 
