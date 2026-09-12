@@ -3,6 +3,8 @@ package dev.sam.wearsignal.messages
 import dev.sam.wearsignal.AppDeps
 import dev.sam.wearsignal.BuildConfig
 import dev.sam.wearsignal.crypto.SessionLock
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+
 import org.signal.core.models.ServiceId
 import org.signal.core.models.ServiceId.ACI
 import org.signal.core.models.ServiceId.PNI
@@ -260,7 +262,7 @@ class EnvelopeProcessor(private val messages: MessagesRepository) {
       put("group_id", groupId)
       put("master_key", masterKey)
     }
-    val inserted = db.insertWithOnConflict("groups", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+    val inserted = db.insertWithOnConflict("groups", null, values, SQLiteDatabase.CONFLICT_IGNORE)
     if (inserted == -1L) {
       db.execSQL(
         "UPDATE groups SET revision = MAX(revision, ?), " +

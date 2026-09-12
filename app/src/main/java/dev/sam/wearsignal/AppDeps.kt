@@ -24,7 +24,8 @@ object AppDeps {
   }
 
   val account: AccountStore by lazy { AccountStore(appContext) }
-  val database: WatchDatabase by lazy { WatchDatabase(appContext) }
+  val database: WatchDatabase by lazy { WatchDatabase(appContext, account) }
+
   val net: SignalNet by lazy { SignalNet(appContext, account) }
   val aciProtocolStore: WatchProtocolStore by lazy { WatchProtocolStore(database, account, "aci") }
   val pniProtocolStore: WatchProtocolStore by lazy { WatchProtocolStore(database, account, "pni") }

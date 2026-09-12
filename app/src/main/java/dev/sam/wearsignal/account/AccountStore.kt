@@ -20,8 +20,9 @@ class AccountStore(context: Context) {
 
   companion object {
     private val TAG = Log.tag(AccountStore::class)
-    private val SENSITIVE_KEYS = listOf("password", "aci_identity", "pni_identity", "profile_key")
+    private val SENSITIVE_KEYS = listOf("password", "aci_identity", "pni_identity", "profile_key", "db_passphrase")
   }
+
 
   private val prefs: SharedPreferences = context.getSharedPreferences("account", Context.MODE_PRIVATE)
 
@@ -104,6 +105,20 @@ class AccountStore(context: Context) {
   var profileKey: ProfileKey?
     get() = securePrefs.getString("profile_key", null)?.let { ProfileKey(Base64.decode(it)) }
     set(value) = securePrefs.edit { putString("profile_key", value?.let { Base64.encodeWithPadding(it.serialize()) }) }
+
+  val databasePassphrase: String
+    get() {
+      val existing = securePrefs.getString("db_passphrase", null)
+      if (existing != null) {
+        return existing
+      }
+      val randomBytes = ByteArray(32)
+      java.security.SecureRandom().nextBytes(randomBytes)
+      val hex = randomBytes.joinToString("") { "%02x".format(it) }
+      securePrefs.edit { putString("db_passphrase", hex) }
+      return hex
+    }
+
 
   var aciRegistrationId: Int
     get() = prefs.getInt("aci_registration_id", 0)

@@ -3,6 +3,8 @@ package dev.sam.wearsignal.crypto
 import android.content.ContentValues
 import dev.sam.wearsignal.account.AccountStore
 import dev.sam.wearsignal.db.WatchDatabase
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.InvalidKeyIdException
@@ -56,7 +58,7 @@ class WatchProtocolStore(
       put("identity_key", identityKey.serialize())
       put("added_at", System.currentTimeMillis())
     }
-    db.writableDatabase.insertWithOnConflict("identities", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("identities", null, values, SQLiteDatabase.CONFLICT_REPLACE)
 
     return if (existing == null) IdentityKeyStore.IdentityChange.NEW_OR_UNCHANGED else IdentityKeyStore.IdentityChange.REPLACED_EXISTING
   }
@@ -97,7 +99,7 @@ class WatchProtocolStore(
       put("key_id", preKeyId)
       put("record", record.serialize())
     }
-    db.writableDatabase.insertWithOnConflict("one_time_prekeys", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("one_time_prekeys", null, values, SQLiteDatabase.CONFLICT_REPLACE)
   }
 
   override fun containsPreKey(preKeyId: Int): Boolean {
@@ -186,7 +188,7 @@ class WatchProtocolStore(
       put("device", address.deviceId)
       put("record", record.serialize())
     }
-    db.writableDatabase.insertWithOnConflict("sessions", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("sessions", null, values, SQLiteDatabase.CONFLICT_REPLACE)
   }
 
   override fun containsSession(address: SignalProtocolAddress): Boolean {
@@ -238,7 +240,7 @@ class WatchProtocolStore(
       put("key_id", signedPreKeyId)
       put("record", record.serialize())
     }
-    db.writableDatabase.insertWithOnConflict("signed_prekeys", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("signed_prekeys", null, values, SQLiteDatabase.CONFLICT_REPLACE)
   }
 
   override fun containsSignedPreKey(signedPreKeyId: Int): Boolean {
@@ -302,7 +304,7 @@ class WatchProtocolStore(
       put("record", record.serialize())
       put("is_last_resort", if (lastResort) 1 else 0)
     }
-    db.writableDatabase.insertWithOnConflict("kyber_prekeys", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("kyber_prekeys", null, values, SQLiteDatabase.CONFLICT_REPLACE)
   }
 
   override fun containsKyberPreKey(kyberPreKeyId: Int): Boolean {
@@ -334,7 +336,7 @@ class WatchProtocolStore(
       put("signed_key_id", signedKeyId)
       put("base_key", publicKey.serialize())
     }
-    val rowId = db.writableDatabase.insertWithOnConflict("used_kyber_tuples", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE)
+    val rowId = db.writableDatabase.insertWithOnConflict("used_kyber_tuples", null, values, SQLiteDatabase.CONFLICT_IGNORE)
     if (rowId == -1L) {
       throw ReusedBaseKeyException("Repeated use of kyber prekey $kyberPreKeyId with same base key")
     }
@@ -373,7 +375,7 @@ class WatchProtocolStore(
       put("record", record.serialize())
       put("created_at", System.currentTimeMillis())
     }
-    db.writableDatabase.insertWithOnConflict("sender_keys", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE)
+    db.writableDatabase.insertWithOnConflict("sender_keys", null, values, SQLiteDatabase.CONFLICT_REPLACE)
   }
 
   override fun loadSenderKey(sender: SignalProtocolAddress, distributionId: UUID): SenderKeyRecord? {

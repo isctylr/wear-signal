@@ -2,7 +2,8 @@ package dev.sam.wearsignal.contacts
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+
 import dev.sam.wearsignal.AppDeps
 import org.signal.core.models.ServiceId
 import org.signal.core.util.logging.Log

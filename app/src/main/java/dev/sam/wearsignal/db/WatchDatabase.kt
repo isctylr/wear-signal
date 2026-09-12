@@ -1,21 +1,105 @@
 package dev.sam.wearsignal.db
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
+import dev.sam.wearsignal.account.AccountStore
+import net.zetetic.database.sqlcipher.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteOpenHelper
+import org.signal.core.util.logging.Log
+import java.io.File
 
 /**
- * Single SQLite database holding the Signal protocol stores (per account identity: "aci"/"pni"),
- * received messages, and the contact-name cache.
+ * Single encrypted SQLCipher database holding the Signal protocol stores (per account identity: "aci"/"pni"),
+ * received messages, and the contact-name cache. Encrypted with AES-256 using an Android Keystore passphrase.
  */
-class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db", null, 7) {
+class WatchDatabase private constructor(
+  context: Context,
+  passphrase: ByteArray,
+  @Suppress("UNUSED_PARAMETER") dummy: Unit
+) : SQLiteOpenHelper(
+  context,
+  DATABASE_NAME,
+  passphrase,
+  null,
+  DATABASE_VERSION,
+  0,
+  null,
+  null,
+  true
+) {
+
+  companion object {
+    const val DATABASE_NAME = "wearsignal.db"
+    const val DATABASE_VERSION = 7
+    private val TAG = Log.tag(WatchDatabase::class)
+
+    init {
+      System.loadLibrary("sqlcipher")
+    }
+
+    operator fun invoke(context: Context, account: AccountStore): WatchDatabase {
+      val passphrase = account.databasePassphrase
+      val passphraseBytes = passphrase.toByteArray(Charsets.UTF_8)
+      migratePlaintextIfNeeded(context, passphrase)
+      return WatchDatabase(context, passphraseBytes, Unit)
+    }
+
+    private fun migratePlaintextIfNeeded(context: Context, passphrase: String) {
+      val dbFile = context.getDatabasePath(DATABASE_NAME)
+      if (!dbFile.exists() || dbFile.length() < 16) return
+
+      val header = ByteArray(16)
+      try {
+        dbFile.inputStream().use { it.read(header) }
+      } catch (t: Throwable) {
+        Log.w(TAG, "Failed to read database header", t)
+        return
+      }
+
+      val isPlaintext = header.contentEquals("SQLite format 3\u0000".toByteArray(Charsets.US_ASCII))
+      if (!isPlaintext) {
+        // Already encrypted with SQLCipher
+        return
+      }
+
+      Log.i(TAG, "Plaintext SQLite database detected; migrating to SQLCipher AES-256...")
+      val tempEncrypted = File(dbFile.parentFile, "wearsignal_encrypted.db")
+      if (tempEncrypted.exists()) tempEncrypted.delete()
+
+      try {
+        val plainDb = SQLiteDatabase.openOrCreateDatabase(dbFile.path, "", null, null)
+        try {
+          val version = plainDb.version
+          plainDb.rawExecSQL("ATTACH DATABASE '${tempEncrypted.path}' AS encrypted KEY '$passphrase';")
+          plainDb.rawExecSQL("SELECT sqlcipher_export('encrypted');")
+          plainDb.rawExecSQL("PRAGMA encrypted.user_version = $version;")
+          plainDb.rawExecSQL("DETACH DATABASE encrypted;")
+        } finally {
+          plainDb.close()
+        }
+
+        File(dbFile.path + "-wal").delete()
+        File(dbFile.path + "-shm").delete()
+        File(dbFile.path + "-journal").delete()
+
+        if (dbFile.delete() && tempEncrypted.renameTo(dbFile)) {
+          Log.i(TAG, "Successfully migrated database to SQLCipher encryption")
+        } else {
+          Log.e(TAG, "Failed to replace plaintext database with encrypted database")
+        }
+      } catch (t: Throwable) {
+        Log.e(TAG, "Failed to migrate plaintext database to SQLCipher", t)
+        if (tempEncrypted.exists()) tempEncrypted.delete()
+      }
+    }
+  }
 
   override fun onCreate(db: SQLiteDatabase) {
+
     createDirectoryTable(db)
     createGroupsTable(db)
     db.execSQL(
       """
-      CREATE TABLE identities (
+      CREATE TABLE IF NOT EXISTS identities (
         account TEXT NOT NULL,
         address TEXT NOT NULL,
         identity_key BLOB NOT NULL,
@@ -26,7 +110,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE sessions (
+      CREATE TABLE IF NOT EXISTS sessions (
         account TEXT NOT NULL,
         address TEXT NOT NULL,
         device INTEGER NOT NULL,
@@ -37,7 +121,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE one_time_prekeys (
+      CREATE TABLE IF NOT EXISTS one_time_prekeys (
         account TEXT NOT NULL,
         key_id INTEGER NOT NULL,
         record BLOB NOT NULL,
@@ -48,7 +132,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE signed_prekeys (
+      CREATE TABLE IF NOT EXISTS signed_prekeys (
         account TEXT NOT NULL,
         key_id INTEGER NOT NULL,
         record BLOB NOT NULL,
@@ -58,7 +142,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE kyber_prekeys (
+      CREATE TABLE IF NOT EXISTS kyber_prekeys (
         account TEXT NOT NULL,
         key_id INTEGER NOT NULL,
         record BLOB NOT NULL,
@@ -70,7 +154,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE used_kyber_tuples (
+      CREATE TABLE IF NOT EXISTS used_kyber_tuples (
         account TEXT NOT NULL,
         kyber_key_id INTEGER NOT NULL,
         signed_key_id INTEGER NOT NULL,
@@ -81,7 +165,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE sender_keys (
+      CREATE TABLE IF NOT EXISTS sender_keys (
         account TEXT NOT NULL,
         address TEXT NOT NULL,
         device INTEGER NOT NULL,
@@ -94,7 +178,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE messages (
+      CREATE TABLE IF NOT EXISTS messages (
         _id INTEGER PRIMARY KEY AUTOINCREMENT,
         peer TEXT NOT NULL,
         sender_aci TEXT NOT NULL,
@@ -114,7 +198,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
     )
     db.execSQL(
       """
-      CREATE TABLE contacts (
+      CREATE TABLE IF NOT EXISTS contacts (
         aci TEXT PRIMARY KEY,
         profile_key BLOB,
         name TEXT,
@@ -187,7 +271,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
   private fun createGroupsTable(db: SQLiteDatabase) {
     db.execSQL(
       """
-      CREATE TABLE groups (
+      CREATE TABLE IF NOT EXISTS groups (
         group_id TEXT PRIMARY KEY,
         master_key BLOB NOT NULL,
         revision INTEGER NOT NULL DEFAULT 0,
@@ -204,7 +288,7 @@ class WatchDatabase(context: Context) : SQLiteOpenHelper(context, "wearsignal.db
   private fun createDirectoryTable(db: SQLiteDatabase) {
     db.execSQL(
       """
-      CREATE TABLE directory (
+      CREATE TABLE IF NOT EXISTS directory (
         e164 TEXT PRIMARY KEY,
         aci TEXT NOT NULL,
         name TEXT
