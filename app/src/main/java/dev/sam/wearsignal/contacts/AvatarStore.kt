@@ -26,7 +26,16 @@ class AvatarStore(context: Context) {
   }
 
   private val appContext = context.applicationContext
-  val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+  private val dir = File(context.filesDir, "avatars").apply { mkdirs() }
+
+  /** Creates a temporary file inside the private avatar storage directory. */
+  fun createTempFile(prefix: String = "avatar"): File = File.createTempFile(prefix, ".tmp", dir)
+
+  /** Deletes all cached avatars and recreates the directory. */
+  fun clearAll() {
+    dir.deleteRecursively()
+    dir.mkdirs()
+  }
 
   // Group ids are base64 ('/', '+', '='); ACIs/PNIs pass through mostly unchanged.
   private fun fileForKey(key: String) = File(dir, key.replace(Regex("[^a-zA-Z0-9-]"), "_") + ".jpg")
@@ -45,7 +54,8 @@ class AvatarStore(context: Context) {
         return
       }
 
-      val encrypted = File.createTempFile("avatar", ".tmp", dir)
+      val encrypted = createTempFile("avatar")
+
       try {
         // downloadFromCdn appends, so the temp file must start empty (createTempFile guarantees it)
         AppDeps.net.authPushServiceSocket.retrieveProfileAvatar(avatarPath, encrypted, MAX_AVATAR_DOWNLOAD_BYTES)
