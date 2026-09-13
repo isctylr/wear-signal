@@ -57,7 +57,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
       // off = rely on the phone forwarding its notifications.
       Chip(
         label = { Text(if (backgroundPolling) "Notifications: on" else "Notifications: off") },
-        secondaryLabel = { Text(if (backgroundPolling) "Polls every $intervalMinutes min" else "Phone forwards only") },
+        secondaryLabel = { Text(if (backgroundPolling) "Polls every $intervalMinutes min when away" else "Phone forwards only") },
         onClick = {
           backgroundPolling = !backgroundPolling
           account.backgroundPollingEnabled = backgroundPolling
@@ -130,6 +130,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
             false -> null
           }
           account.phoneConnectedOverride = override
+          PollScheduler.scheduleNext(context)
         },
         colors = ChipDefaults.secondaryChipColors(),
         modifier = Modifier.fillMaxWidth()
