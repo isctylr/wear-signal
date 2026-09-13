@@ -116,7 +116,7 @@ fun ThreadScreen(
           Text(
             text = "⚠ $pollStatus",
             style = MaterialTheme.typography.caption3,
-            color = Color(0xFFFFAB91),
+            color = MaterialTheme.colors.error,
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
           )
@@ -288,7 +288,7 @@ private fun DayDivider(at: Long) {
   Text(
     text = SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(at)),
     style = MaterialTheme.typography.caption3,
-    color = Color(0xFF9E9E9E),
+    color = MaterialTheme.colors.onSurfaceVariant,
     textAlign = TextAlign.Center,
     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
   )

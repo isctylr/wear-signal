@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
+import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import dev.sam.wearsignal.AppDeps
 import dev.sam.wearsignal.poll.PollScheduler
@@ -137,7 +138,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
     item {
       if (confirmingUnlink) {
         Chip(
-          label = { Text("Confirm Unlink", color = androidx.compose.ui.graphics.Color(0xFFFF8A80)) },
+          label = { Text("Confirm Unlink", color = MaterialTheme.colors.error) },
           secondaryLabel = { Text("Wipes all chats and keys") },
           onClick = {
             PollScheduler.cancel(context)

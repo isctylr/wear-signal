@@ -21,20 +21,20 @@ import androidx.wear.compose.material.Text
 import dev.sam.wearsignal.AppDeps
 import kotlin.math.abs
 
-/** Deterministic per-sender palette (Signal-ish avatar colours, readable with white text). */
+/** Deterministic per-sender palette using official Signal contact colors. */
 private val AVATAR_COLORS = listOf(
-  Color(0xFFD32F2F), // red
-  Color(0xFFC2185B), // pink
-  Color(0xFF7B1FA2), // purple
-  Color(0xFF512DA8), // deep purple
-  Color(0xFF1976D2), // blue
-  Color(0xFF0288D1), // light blue
-  Color(0xFF00796B), // teal
-  Color(0xFF388E3C), // green
-  Color(0xFFF57C00), // orange
-  Color(0xFFE64A19), // deep orange
-  Color(0xFF5D4037), // brown
-  Color(0xFF455A64)  // blue grey
+  Color(0xFFCC163D), // crimson
+  Color(0xFFE4492C), // vermilion
+  Color(0xFFC46200), // amber
+  Color(0xFF2C8243), // forest
+  Color(0xFF0F8276), // wintergreen
+  Color(0xFF1B808F), // teal
+  Color(0xFF2C6BED), // ultramarine
+  Color(0xFF4D62CD), // indigo
+  Color(0xFF8657C7), // violet
+  Color(0xFFA24792), // plum
+  Color(0xFF826D68), // taupe
+  Color(0xFF697A87)  // steel
 )
 
 /** Stable colour for a sender/conversation key (ACI or group id). */

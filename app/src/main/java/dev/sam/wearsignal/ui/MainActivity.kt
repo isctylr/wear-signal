@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     setContent {
-      MaterialTheme {
+      WearSignalTheme {
         WearSignalNavHost()
       }
     }

@@ -51,7 +51,7 @@ fun ConversationsScreen(
         Text(
           text = "⚠ $pollStatus",
           style = MaterialTheme.typography.caption2,
-          color = Color(0xFFFFAB91),
+          color = MaterialTheme.colors.error,
           textAlign = TextAlign.Center,
           modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
         )
