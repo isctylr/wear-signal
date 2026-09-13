@@ -21,21 +21,32 @@ class PollWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
   }
 
   override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+    var shouldArmNext = false
     try {
       if (!AppDeps.account.isLinked) return@withContext Result.success()
 
       if (PhoneConnectionMonitor.isPhoneConnected(applicationContext)) {
-        Log.i(TAG, "Phone connected; skipping poll")
-      } else {
-        Poller.poll(silent = false)
+        Log.i(TAG, "Phone connected; skipping poll and disarming recurring alarms")
+        PollScheduler.cancel(applicationContext)
+        return@withContext Result.success()
       }
 
+      Poller.poll(silent = false)
+      shouldArmNext = AppDeps.account.backgroundPollingEnabled
       Result.success()
     } catch (t: Throwable) {
       Log.w(TAG, "Poll failed", t)
+      shouldArmNext = AppDeps.account.backgroundPollingEnabled
       Result.success() // next alarm fires regardless; don't let WorkManager backoff fight the schedule
     } finally {
-      PollScheduler.scheduleNext(applicationContext)
+      if (shouldArmNext) {
+        if (!PhoneConnectionMonitor.isPhoneConnected(applicationContext)) {
+          PollScheduler.armAlarm(applicationContext)
+        } else {
+          Log.i(TAG, "Phone connected after poll; disarming recurring alarms")
+          PollScheduler.cancel(applicationContext)
+        }
+      }
     }
   }
 }

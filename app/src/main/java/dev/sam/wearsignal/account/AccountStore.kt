@@ -172,6 +172,14 @@ class AccountStore(context: Context) {
     get() = prefs.getBoolean("send_read_receipts", false)
     set(value) = prefs.edit { putBoolean("send_read_receipts", value) }
 
+  /**
+   * Whether to automatically fetch latest messages whenever the app is opened or wakes up.
+   * On by default for convenience.
+   */
+  var syncOnOpenEnabled: Boolean
+    get() = prefs.getBoolean("sync_on_open_enabled", true)
+    set(value) = prefs.edit { putBoolean("sync_on_open_enabled", value) }
+
   fun clear() {
     prefs.edit { clear() }
     if (securePrefs !== prefs) {
