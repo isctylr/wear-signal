@@ -31,6 +31,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
   val account = AppDeps.account
   var intervalMinutes by remember { mutableIntStateOf(account.pollIntervalMinutes) }
   var backgroundPolling by remember { mutableStateOf(account.backgroundPollingEnabled) }
+  var syncOnOpen by remember { mutableStateOf(account.syncOnOpenEnabled) }
   var override by remember { mutableStateOf(account.phoneConnectedOverride) }
   var lockscreenPrivacy by remember { mutableStateOf(account.lockscreenPrivacyEnabled) }
   var readReceipts by remember { mutableStateOf(account.sendReadReceipts) }
@@ -84,6 +85,18 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
           modifier = Modifier.fillMaxWidth()
         )
       }
+    }
+    item {
+      Chip(
+        label = { Text(if (syncOnOpen) "Check on open: on" else "Check on open: off") },
+        secondaryLabel = { Text(if (syncOnOpen) "Syncs on launch & wake" else "Manual sync only") },
+        onClick = {
+          syncOnOpen = !syncOnOpen
+          account.syncOnOpenEnabled = syncOnOpen
+        },
+        colors = ChipDefaults.secondaryChipColors(),
+        modifier = Modifier.fillMaxWidth()
+      )
     }
     item {
       Chip(

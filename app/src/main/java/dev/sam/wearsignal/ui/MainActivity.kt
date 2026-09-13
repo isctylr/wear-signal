@@ -86,7 +86,7 @@ fun WearSignalNavHost() {
   DisposableEffect(lifecycleOwner) {
     val observer = LifecycleEventObserver { _, event ->
       if (event == Lifecycle.Event.ON_RESUME) {
-        if (AppDeps.account.isLinked) {
+        if (AppDeps.account.isLinked && AppDeps.account.syncOnOpenEnabled) {
           val sinceLastPoll = System.currentTimeMillis() - AppDeps.account.lastPollAt
           if (sinceLastPoll > 10_000L) {
             pollNow()
