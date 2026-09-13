@@ -163,6 +163,15 @@ class AccountStore(context: Context) {
     get() = prefs.getBoolean("lockscreen_privacy_enabled", true)
     set(value) = prefs.edit { putBoolean("lockscreen_privacy_enabled", value) }
 
+  /**
+   * Whether viewing a thread sends READ receipts to the message authors. Off by default: the
+   * watch can't see the account's read-receipts privacy setting, so it stays silent to
+   * senders until the user opts in. Reads always sync to our own devices regardless.
+   */
+  var sendReadReceipts: Boolean
+    get() = prefs.getBoolean("send_read_receipts", false)
+    set(value) = prefs.edit { putBoolean("send_read_receipts", value) }
+
   fun clear() {
     prefs.edit { clear() }
     if (securePrefs !== prefs) {

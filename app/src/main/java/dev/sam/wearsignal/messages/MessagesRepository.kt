@@ -26,8 +26,19 @@ data class MessageRow(
   /** Content type of the attachment, when the message has one. */
   val attachmentType: String? = null,
   /** Local file of the downloaded (downscaled) image, when available. */
-  val attachmentPath: String? = null
-)
+  val attachmentPath: String? = null,
+  /** Emoji reactions to this message, grouped per emoji, most-used first. */
+  val reactions: List<MessageReaction> = emptyList()
+) {
+  /** The emoji we reacted with, if any (one reaction per person, like Signal). */
+  val myReaction: String? get() = reactions.firstOrNull { it.mine }?.emoji
+}
+
+/** One emoji's reactions to a message: how many people, and whether we're one of them. */
+data class MessageReaction(val emoji: String, val count: Int, val mine: Boolean)
+
+/** An incoming message newly marked seen: its author and sent timestamp (Signal's message key). */
+data class SeenMessage(val senderAci: String, val sentAt: Long)
 
 /** Placeholder body text for attachment messages ("📷 Photo" / "📎 Attachment"). */
 fun attachmentPlaceholder(contentType: String?): String =
@@ -78,6 +89,7 @@ class MessagesRepository(private val db: WatchDatabase) {
       """,
       arrayOf(peer, peer)
     )
+    pruneOrphanedReactions(peer)
   }
 
   /** Remote deletion ("Delete for Everyone"): removes messages by sent timestamp. */
@@ -93,6 +105,7 @@ class MessagesRepository(private val db: WatchDatabase) {
     }
     db.writableDatabase.delete("messages", "sent_at = ?", arrayOf(sentAt.toString()))
     pathsToDelete.forEach { java.io.File(it).delete() }
+    pruneOrphanedReactions()
   }
 
   /** Purges messages whose disappearing expiration timer has elapsed. */
@@ -112,6 +125,7 @@ class MessagesRepository(private val db: WatchDatabase) {
     if (hasExpired) {
       db.writableDatabase.delete("messages", "expires_at > 0 AND expires_at <= ?", arrayOf(now.toString()))
       pathsToDelete.forEach { java.io.File(it).delete() }
+      pruneOrphanedReactions()
     }
   }
 
@@ -163,9 +177,145 @@ class MessagesRepository(private val db: WatchDatabase) {
     return result
   }
 
-  /** Messages of one conversation, oldest first, with sender names resolved from the contacts cache. */
-  fun thread(peer: String): List<MessageRow> {
+  /**
+   * Incoming messages not yet seen anywhere — shown on the tile and complication.
+   * "Seen" means read on the phone (synced over) or its thread viewed on the watch.
+   */
+  fun unreadCount(): Int {
+    db.readableDatabase.rawQuery(
+      "SELECT COUNT(*) FROM messages WHERE from_self = 0 AND seen_at = 0",
+      null
+    ).use { cursor ->
+      return if (cursor.moveToFirst()) cursor.getInt(0) else 0
+    }
+  }
+
+  /** Marks a conversation's incoming messages seen (its thread is on screen). Returns the newly seen ones. */
+  fun markThreadSeen(peer: String): List<SeenMessage> {
+    val seen = mutableListOf<SeenMessage>()
+    db.readableDatabase.rawQuery(
+      "SELECT sender_aci, sent_at FROM messages WHERE peer = ? AND from_self = 0 AND seen_at = 0",
+      arrayOf(peer)
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        seen += SeenMessage(senderAci = cursor.getString(0), sentAt = cursor.getLong(1))
+      }
+    }
+    if (seen.isNotEmpty()) {
+      val values = android.content.ContentValues().apply { put("seen_at", System.currentTimeMillis()) }
+      db.writableDatabase.update("messages", values, "peer = ? AND from_self = 0 AND seen_at = 0", arrayOf(peer))
+    }
+    return seen
+  }
+
+  /**
+   * Folds a PNI-keyed 1:1 conversation into the person's ACI thread, once the association is
+   * learned (their PNI signature, or CDSI returning the ACI). Also repoints the contact
+   * directory's send target so future sends go to the ACI. Returns whether anything changed.
+   */
+  fun mergePniIntoAci(pni: String, aci: String): Boolean {
+    if (pni == aci) return false
+    val writable = db.writableDatabase
+    // Carry the address-book name over to the contacts table (keyed by ACI) so the merged
+    // thread is titled, without clobbering a name already resolved from their Signal profile.
+    writable.execSQL(
+      "INSERT INTO contacts (aci, name, fetched_at) SELECT ?, name, 0 FROM directory WHERE aci = ? AND name IS NOT NULL " +
+        "ON CONFLICT(aci) DO UPDATE SET name = COALESCE(contacts.name, excluded.name)",
+      arrayOf(aci, pni)
+    )
+    val directoryMoved = writable.compileStatement("UPDATE directory SET aci = ? WHERE aci = ?").use {
+      it.bindString(1, aci)
+      it.bindString(2, pni)
+      it.executeUpdateDelete()
+    }
+    val moved = writable.compileStatement("UPDATE messages SET peer = ? WHERE peer = ?").use {
+      it.bindString(1, aci)
+      it.bindString(2, pni)
+      it.executeUpdateDelete()
+    }
+    writable.execSQL("UPDATE reactions SET peer = ? WHERE peer = ?", arrayOf(aci, pni))
+    if (moved > 0) {
+      writable.execSQL(
+        """
+        DELETE FROM messages WHERE peer = ? AND _id NOT IN (
+          SELECT _id FROM messages WHERE peer = ? ORDER BY sent_at DESC LIMIT $MAX_PER_CONVERSATION
+        )
+        """,
+        arrayOf(aci, aci)
+      )
+      pruneOrphanedReactions(aci)
+    }
+    return moved > 0 || directoryMoved > 0
+  }
+
+  /** Drops reactions whose target message no longer exists (pruned past the cap or merged away). */
+  fun pruneOrphanedReactions(peer: String? = null) {
+    if (peer != null) {
+      db.writableDatabase.execSQL(
+        """
+        DELETE FROM reactions WHERE peer = ? AND NOT EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.peer = reactions.peer AND m.sent_at = reactions.target_sent_at AND m.sender_aci = reactions.target_author_aci
+        )
+        """,
+        arrayOf(peer)
+      )
+    } else {
+      db.writableDatabase.execSQL(
+        """
+        DELETE FROM reactions WHERE NOT EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.peer = reactions.peer AND m.sent_at = reactions.target_sent_at AND m.sender_aci = reactions.target_author_aci
+        )
+        """
+      )
+    }
+  }
+
+  /**
+   * Applies one person's reaction to a message. A new reaction replaces their previous one;
+   * [remove] retracts it. Returns false for reactions to messages we don't have (dropped).
+   */
+  fun applyReaction(
+    peer: String,
+    targetSentAt: Long,
+    targetAuthorAci: String,
+    reacterAci: String,
+    emoji: String,
+    remove: Boolean
+  ): Boolean {
+    if (remove) {
+      return db.writableDatabase.delete(
+        "reactions",
+        "target_sent_at = ? AND target_author_aci = ? AND reacter_aci = ?",
+        arrayOf(targetSentAt.toString(), targetAuthorAci, reacterAci)
+      ) > 0
+    }
+    val targetExists = db.readableDatabase.rawQuery(
+      "SELECT 1 FROM messages WHERE peer = ? AND sent_at = ? AND sender_aci = ? LIMIT 1",
+      arrayOf(peer, targetSentAt.toString(), targetAuthorAci)
+    ).use { it.moveToFirst() }
+    if (!targetExists) return false
+
+    val values = ContentValues().apply {
+      put("peer", peer)
+      put("target_sent_at", targetSentAt)
+      put("target_author_aci", targetAuthorAci)
+      put("reacter_aci", reacterAci)
+      put("emoji", emoji)
+      put("at", System.currentTimeMillis())
+    }
+    db.writableDatabase.insertWithOnConflict("reactions", null, values, net.zetetic.database.sqlcipher.SQLiteDatabase.CONFLICT_REPLACE)
+    return true
+  }
+
+  /**
+   * Messages of one conversation, oldest first, with sender names resolved from the contacts
+   * cache and reactions attached. [selfAci] identifies our own reactions (for the toggle UI).
+   */
+  fun thread(peer: String, selfAci: String? = null): List<MessageRow> {
     purgeExpired()
+    val reactionsByTarget = threadReactions(peer, selfAci)
     val result = mutableListOf<MessageRow>()
     db.readableDatabase.rawQuery(
       """
@@ -181,6 +331,7 @@ class MessagesRepository(private val db: WatchDatabase) {
         val senderAci = cursor.getString(0)
         val fromSelf = cursor.getInt(3) == 1
         val name = if (cursor.isNull(4)) null else cursor.getString(4)
+        val sentAt = cursor.getLong(2)
         result += MessageRow(
           sender = when {
             fromSelf -> "Me"
@@ -189,15 +340,36 @@ class MessagesRepository(private val db: WatchDatabase) {
           },
           senderAci = senderAci,
           body = cursor.getString(1),
-          sentAt = cursor.getLong(2),
+          sentAt = sentAt,
           fromSelf = fromSelf,
           delivered = cursor.getLong(5) > 0,
           read = cursor.getLong(6) > 0,
           attachmentType = if (cursor.isNull(7)) null else cursor.getString(7),
-          attachmentPath = if (cursor.isNull(8)) null else cursor.getString(8)
+          attachmentPath = if (cursor.isNull(8)) null else cursor.getString(8),
+          reactions = reactionsByTarget[sentAt to senderAci] ?: emptyList()
         )
       }
     }
     return result
+  }
+
+  /** A conversation's reactions grouped per target message and emoji, most-used emoji first. */
+  private fun threadReactions(peer: String, selfAci: String?): Map<Pair<Long, String>, List<MessageReaction>> {
+    data class Raw(val reacter: String, val emoji: String)
+    val rawByTarget = mutableMapOf<Pair<Long, String>, MutableList<Raw>>()
+    db.readableDatabase.rawQuery(
+      "SELECT target_sent_at, target_author_aci, reacter_aci, emoji FROM reactions WHERE peer = ? ORDER BY at ASC",
+      arrayOf(peer)
+    ).use { cursor ->
+      while (cursor.moveToNext()) {
+        val key = cursor.getLong(0) to cursor.getString(1)
+        rawByTarget.getOrPut(key) { mutableListOf() } += Raw(cursor.getString(2), cursor.getString(3))
+      }
+    }
+    return rawByTarget.mapValues { (_, raws) ->
+      raws.groupBy { it.emoji }
+        .map { (emoji, group) -> MessageReaction(emoji, group.size, group.any { it.reacter == selfAci }) }
+        .sortedByDescending { it.count }
+    }
   }
 }

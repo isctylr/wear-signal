@@ -32,6 +32,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
   var backgroundPolling by remember { mutableStateOf(account.backgroundPollingEnabled) }
   var override by remember { mutableStateOf(account.phoneConnectedOverride) }
   var lockscreenPrivacy by remember { mutableStateOf(account.lockscreenPrivacyEnabled) }
+  var readReceipts by remember { mutableStateOf(account.sendReadReceipts) }
   var confirmingUnlink by remember { mutableStateOf(false) }
 
   ScalingLazyColumn {
@@ -90,6 +91,20 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
         onClick = {
           lockscreenPrivacy = !lockscreenPrivacy
           account.lockscreenPrivacyEnabled = lockscreenPrivacy
+        },
+        colors = ChipDefaults.secondaryChipColors(),
+        modifier = Modifier.fillMaxWidth()
+      )
+    }
+    item {
+      // Off by default: the watch can't see the account's read-receipts privacy setting,
+      // so it stays silent to senders until the user opts in. Reads always sync to the phone.
+      Chip(
+        label = { Text(if (readReceipts) "Read receipts: on" else "Read receipts: off") },
+        secondaryLabel = { Text(if (readReceipts) "Senders see when you read" else "Only your phone syncs") },
+        onClick = {
+          readReceipts = !readReceipts
+          account.sendReadReceipts = readReceipts
         },
         colors = ChipDefaults.secondaryChipColors(),
         modifier = Modifier.fillMaxWidth()

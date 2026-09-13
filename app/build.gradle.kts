@@ -155,6 +155,10 @@ dependencies {
   implementation(libs.androidx.security.crypto)
   implementation(libs.sqlcipher.android)
   implementation(libs.androidx.sqlite)
+  implementation(libs.wear.tiles)
+  implementation(libs.wear.protolayout)
+  implementation(libs.watchface.complications.datasource.ktx)
+  implementation(libs.androidx.concurrent.futures)
 }
 
 

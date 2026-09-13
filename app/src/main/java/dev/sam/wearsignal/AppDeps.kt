@@ -18,6 +18,7 @@ import dev.sam.wearsignal.notify.NotificationPresenter
 object AppDeps {
 
   private lateinit var appContext: Context
+  val context: Context get() = appContext
 
   fun init(context: Context) {
     appContext = context.applicationContext
