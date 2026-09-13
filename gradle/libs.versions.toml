@@ -48,5 +48,9 @@ work-runtime = "androidx.work:work-runtime-ktx:2.10.5"
 androidx-security-crypto = "androidx.security:security-crypto:1.1.0-alpha06"
 sqlcipher-android = "net.zetetic:sqlcipher-android:4.17.0"
 androidx-sqlite = "androidx.sqlite:sqlite:2.4.0"
+wear-tiles = "androidx.wear.tiles:tiles:1.4.0"
+wear-protolayout = "androidx.wear.protolayout:protolayout:1.2.0"
+watchface-complications-datasource-ktx = "androidx.wear.watchface:watchface-complications-data-source-ktx:1.2.1"
+androidx-concurrent-futures = "androidx.concurrent:concurrent-futures:1.2.0"
 
 

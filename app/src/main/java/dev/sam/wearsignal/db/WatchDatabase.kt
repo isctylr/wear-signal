@@ -31,7 +31,7 @@ class WatchDatabase private constructor(
 
   companion object {
     const val DATABASE_NAME = "wearsignal.db"
-    const val DATABASE_VERSION = 8
+    const val DATABASE_VERSION = 10
     private val TAG = Log.tag(WatchDatabase::class)
 
     private val DATABASE_HOOK = object : SQLiteDatabaseHook {
@@ -111,6 +111,7 @@ class WatchDatabase private constructor(
 
     createDirectoryTable(db)
     createGroupsTable(db)
+    createReactionsTable(db)
     db.execSQL(
       """
       CREATE TABLE IF NOT EXISTS identities (
@@ -206,7 +207,8 @@ class WatchDatabase private constructor(
         attachment_type TEXT,
         attachment_pointer BLOB,
         attachment_path TEXT,
-        expires_at INTEGER NOT NULL DEFAULT 0
+        expires_at INTEGER NOT NULL DEFAULT 0,
+        seen_at INTEGER NOT NULL DEFAULT 0
       )
       """
     )
@@ -266,12 +268,24 @@ class WatchDatabase private constructor(
     if (oldVersion < 8) {
       createIndexes(db)
     }
+    if (oldVersion < 9) {
+      // When an incoming message stopped being unread: read on the phone (synced via
+      // SyncMessage.read/viewed) or its thread viewed here. Existing rows start seen
+      // so the upgrade doesn't declare the whole history unread.
+      db.execSQL("ALTER TABLE messages ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0")
+      db.execSQL("UPDATE messages SET seen_at = ${System.currentTimeMillis()} WHERE from_self = 0")
+    }
+    if (oldVersion < 10) {
+      createReactionsTable(db)
+      db.execSQL("CREATE INDEX IF NOT EXISTS idx_reactions_peer ON reactions(peer)")
+    }
   }
 
   private fun createIndexes(db: SQLiteDatabase) {
     db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_peer_sent_at ON messages(peer, sent_at ASC)")
     db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages(expires_at)")
     db.execSQL("CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS idx_reactions_peer ON reactions(peer)")
   }
 
   /** Completely clears all tables during device unlink / data wipe. */
@@ -280,6 +294,7 @@ class WatchDatabase private constructor(
     db.beginTransaction()
     try {
       db.delete("messages", null, null)
+      db.delete("reactions", null, null)
       db.delete("identities", null, null)
       db.delete("sessions", null, null)
       db.delete("one_time_prekeys", null, null)
@@ -294,6 +309,23 @@ class WatchDatabase private constructor(
     } finally {
       db.endTransaction()
     }
+  }
+
+  /** Reactions to messages: keyed by (peer, target_sent_at, target_author_aci, reacter_aci). */
+  private fun createReactionsTable(db: SQLiteDatabase) {
+    db.execSQL(
+      """
+      CREATE TABLE IF NOT EXISTS reactions (
+        peer TEXT NOT NULL,
+        target_sent_at INTEGER NOT NULL,
+        target_author_aci TEXT NOT NULL,
+        reacter_aci TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (peer, target_sent_at, target_author_aci, reacter_aci)
+      )
+      """
+    )
   }
 
   /** GroupsV2 state cache: master key harvested from message contexts, title/members fetched from the group server. */

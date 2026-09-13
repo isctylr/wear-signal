@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
+import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import dev.sam.wearsignal.AppDeps
 import dev.sam.wearsignal.poll.PollScheduler
@@ -32,6 +33,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
   var backgroundPolling by remember { mutableStateOf(account.backgroundPollingEnabled) }
   var override by remember { mutableStateOf(account.phoneConnectedOverride) }
   var lockscreenPrivacy by remember { mutableStateOf(account.lockscreenPrivacyEnabled) }
+  var readReceipts by remember { mutableStateOf(account.sendReadReceipts) }
   var confirmingUnlink by remember { mutableStateOf(false) }
 
   ScalingLazyColumn {
@@ -96,6 +98,20 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
       )
     }
     item {
+      // Off by default: the watch can't see the account's read-receipts privacy setting,
+      // so it stays silent to senders until the user opts in. Reads always sync to the phone.
+      Chip(
+        label = { Text(if (readReceipts) "Read receipts: on" else "Read receipts: off") },
+        secondaryLabel = { Text(if (readReceipts) "Senders see when you read" else "Only your phone syncs") },
+        onClick = {
+          readReceipts = !readReceipts
+          account.sendReadReceipts = readReceipts
+        },
+        colors = ChipDefaults.secondaryChipColors(),
+        modifier = Modifier.fillMaxWidth()
+      )
+    }
+    item {
       // Debug helper while testing on the emulator: force the phone-connected state.
       Chip(
         label = {
@@ -122,7 +138,7 @@ fun StatusScreen(onUnlinked: () -> Unit = {}) {
     item {
       if (confirmingUnlink) {
         Chip(
-          label = { Text("Confirm Unlink", color = androidx.compose.ui.graphics.Color(0xFFFF8A80)) },
+          label = { Text("Confirm Unlink", color = MaterialTheme.colors.error) },
           secondaryLabel = { Text("Wipes all chats and keys") },
           onClick = {
             PollScheduler.cancel(context)
