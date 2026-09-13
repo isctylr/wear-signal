@@ -153,5 +153,8 @@ dependencies {
   implementation(libs.zxing.core)
   implementation(libs.work.runtime)
   implementation(libs.androidx.security.crypto)
+  implementation(libs.sqlcipher.android)
+  implementation(libs.androidx.sqlite)
 }
+
 

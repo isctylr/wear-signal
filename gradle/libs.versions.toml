@@ -46,4 +46,7 @@ playservices-wearable = "com.google.android.gms:play-services-wearable:19.0.0"
 zxing-core = "com.google.zxing:core:3.5.3"
 work-runtime = "androidx.work:work-runtime-ktx:2.10.5"
 androidx-security-crypto = "androidx.security:security-crypto:1.1.0-alpha06"
+sqlcipher-android = "net.zetetic:sqlcipher-android:4.17.0"
+androidx-sqlite = "androidx.sqlite:sqlite:2.4.0"
+
 
